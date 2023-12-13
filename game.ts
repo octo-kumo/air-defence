@@ -32,6 +32,7 @@ import Stats from 'three/examples/jsm/libs/stats.module';
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls";
 
 export class AirDefence {
+    lastFrame: number = 0;
     private parent?: HTMLElement;
     private readonly loader: TextureLoader;
     private readonly stats: Stats;
@@ -43,9 +44,7 @@ export class AirDefence {
     private readonly camera: PerspectiveCamera;
     private readonly fpsCamera: PerspectiveCamera;
     private readonly controls: OrbitControls;
-
     private readonly resize_observer: ResizeObserver;
-
     private readonly sky: Sky;
     private readonly water: Water;
     private readonly skyLight: DirectionalLight;
@@ -211,8 +210,6 @@ export class AirDefence {
         }
     }
 
-    lastFrame: number = 0;
-
     animation(time: number) {
         this.lastFrame ??= time;
         this.animateStage((time - this.lastFrame) / 1000);
@@ -221,17 +218,6 @@ export class AirDefence {
         this.lastFrame = time;
         this.stats.update();
         this.parent?.ownerDocument.defaultView?.requestAnimationFrame(() => this.animation(Date.now()));
-    }
-
-    private on_resize() {
-        if (this.parent) {
-            this.renderer.setSize(this.parent.clientWidth, this.parent.clientHeight);
-            this.camera.aspect = this.parent.clientWidth / this.parent.clientHeight;
-            this.camera.updateProjectionMatrix();
-            this.fpsCamera.aspect = this.parent.clientWidth / this.parent.clientHeight;
-            this.fpsCamera.updateProjectionMatrix();
-            // this.controls.handleResize();
-        }
     }
 
     regenerate(blend: Material) {
@@ -269,6 +255,17 @@ export class AirDefence {
         });
         if (decoScene) {
             this.terrainScene.add(decoScene);
+        }
+    }
+
+    private on_resize() {
+        if (this.parent) {
+            this.renderer.setSize(this.parent.clientWidth, this.parent.clientHeight);
+            this.camera.aspect = this.parent.clientWidth / this.parent.clientHeight;
+            this.camera.updateProjectionMatrix();
+            this.fpsCamera.aspect = this.parent.clientWidth / this.parent.clientHeight;
+            this.fpsCamera.updateProjectionMatrix();
+            // this.controls.handleResize();
         }
     }
 

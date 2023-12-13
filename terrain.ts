@@ -9,6 +9,7 @@ import {
 import {Mesh} from "three/src/objects/Mesh";
 import {RES_ROOT} from "./config";
 
+// maybe delete
 
 export function createTerrain(width: number, height: number, precision = .1) {
     const loader = new TextureLoader();
