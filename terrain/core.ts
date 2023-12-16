@@ -140,9 +140,8 @@ export function Terrain(opts: Partial<TerrainOptions> = {}): Object3D {
     }
     fromArray1D(mesh.geometry.attributes.position.array, zs);
     Normalize(mesh, options);
-
+    mesh.receiveShadow = true;
     // lod.addLevel(mesh, options.unit * 10 * Math.pow(2, lodLevel));
-
     scene.add(mesh);
     return scene;
 }

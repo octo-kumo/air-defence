@@ -3,6 +3,8 @@ import {Scene} from "three/src/scenes/Scene";
 import {WebGLRenderer} from "three/src/renderers/WebGLRenderer";
 import {
     ACESFilmicToneMapping,
+    AmbientLight,
+    AxesHelper,
     Clock,
     CylinderGeometry,
     DirectionalLight,
@@ -12,30 +14,39 @@ import {
     Material,
     MathUtils,
     MeshLambertMaterial,
+    MeshStandardMaterial,
     Object3D,
     PlaneGeometry,
     PMREMGenerator,
     RepeatWrapping,
+    SphereGeometry,
     TextureLoader,
-    Vector3
+    Vector2,
+    Vector3,
+    WebGLRenderTarget
 } from "three";
-import {EaseInOut, InEaseOut, Linear, Terrain, type TerrainOptions} from "~/games/air-defence/terraints/core";
+import {EaseInOut, InEaseOut, Linear, Terrain, type TerrainOptions} from "~/games/air-defence/terrain/core";
 import {Mesh} from "three/src/objects/Mesh";
 import {RES_ROOT} from "~/games/air-defence/config";
-import {generateBlendedMaterial} from "~/games/air-defence/terraints/materials";
-import {DiamondSquare, Perlin} from "~/games/air-defence/terraints/generator";
-import {ScatterHelper, ScatterMeshes} from "~/games/air-defence/terraints/scatter";
+import {generateBlendedMaterial} from "~/games/air-defence/terrain/materials";
+import {DiamondSquare, Perlin} from "~/games/air-defence/terrain/generator";
+import {ScatterHelper, ScatterMeshes} from "~/games/air-defence/terrain/scatter";
 import {Sky} from "three/examples/jsm/objects/Sky";
 import {ShaderMaterial} from "three/src/Three";
-import {Water} from "three/examples/jsm/objects/Water";
+import {Water} from "three/examples/jsm/objects/Water2";
 import Stats from 'three/examples/jsm/libs/stats.module';
-import {OrbitControls} from "three/examples/jsm/controls/OrbitControls";
+import {calculateSunlight} from "~/games/air-defence/environment";
+import {GUI} from 'dat.gui';
+import {MapControls} from "three/examples/jsm/controls/MapControls";
+import {BallisticObject} from "~/games/air-defence/ballistic_object";
+import {Airplane} from "~/games/air-defence/airplane";
+import type {DynObject} from "~/games/air-defence/dyn_object";
 
 export class AirDefence {
-    lastFrame: number = 0;
     private parent?: HTMLElement;
     private readonly loader: TextureLoader;
     private readonly stats: Stats;
+    private readonly gui: GUI;
     private readonly scene: Scene;
     private readonly sceneEnv: Scene;
     private readonly renderer: WebGLRenderer;
@@ -43,15 +54,28 @@ export class AirDefence {
     private readonly clock: Clock;
     private readonly camera: PerspectiveCamera;
     private readonly fpsCamera: PerspectiveCamera;
-    private readonly controls: OrbitControls;
+    private readonly controls: MapControls;
     private readonly resize_observer: ResizeObserver;
     private readonly sky: Sky;
     private readonly water: Water;
-    private readonly skyLight: DirectionalLight;
     private terrainScene?: Object3D;
     private ratio = 1;
     private readonly options: TerrainOptions;
     private readonly sun: Vector3;
+    private _renderTarget?: WebGLRenderTarget;
+
+    /** DAT GUI **/
+    time: number = 0;
+    useFPSCamera = false;
+
+    private objects: DynObject[] = [];
+    private lights = {
+        sky: new DirectionalLight(0xe8bdb0, 0.2),
+        hemi: new HemisphereLight(0xffffff, 0x8c3b0c, 0.2),
+        amb: new AmbientLight(0xff0000, 0.1)
+    }
+    private plane: Airplane;
+
 
     constructor() {
         const segments = 63, size = 1024;
@@ -76,12 +100,13 @@ export class AirDefence {
             this.stats.dom.style.bottom = "0";
             this.scene = new Scene();
             this.sceneEnv = new Scene();
-            this.scene.fog = new FogExp2(0x868293, 0.0007);
+            this.scene.fog = new FogExp2(0x1ca3ec, 0.00007);
 
             this.renderer = new WebGLRenderer({antialias: true});
+            // this.renderer.shadowMap.enabled = true;
+            // this.renderer.shadowMap.type = PCFSoftShadowMap;
             // this.renderer.setAnimationLoop(this.animation.bind(this));
             this.renderer.toneMapping = ACESFilmicToneMapping;
-            this.renderer.toneMappingExposure = 0.5;
             this.pmremGenerator = new PMREMGenerator(this.renderer);
 
             this.camera = new PerspectiveCamera(60, 1, 1, 2000000);
@@ -93,38 +118,15 @@ export class AirDefence {
             this.camera.rotation.y = 35 * Math.PI / 180;
             this.camera.rotation.z = 37 * Math.PI / 180;
 
-            this.clock = new Clock(false);
+            this.clock = new Clock(true);
         }
         {
-            this.fpsCamera = new PerspectiveCamera(60, 1, 1, 10000);
-            this.scene.add(this.fpsCamera);
-            // this.controls = new FirstPersonControls(this.fpsCamera, this.renderer.domElement);
-            // this.controls.enabled = true;
-            // this.controls.movementSpeed = 100;
-            // this.controls.lookSpeed = 0.075;
-            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-            // this.controls.maxPolarAngle = Math.PI * 0.495;
-            this.controls.target.set(0, 10, 0);
-            this.controls.minDistance = 40.0;
-            this.controls.maxDistance = 200.0;
-            this.controls.update();
+            this.controls = new MapControls(this.camera, this.renderer.domElement);
         }
         {
-            // this.sky = new Mesh(
-            //     new SphereGeometry(100000, 25, 25),
-            //     undefined,
-            // );
-            // this.sky.position.y = -99;
-            // this.loader.load(RES_ROOT + "sky.png", (t1) => {
-            //     t1.minFilter = LinearFilter;
-            //     this.sky.material = new MeshPhongMaterial({map: t1, side: BackSide, fog: false})
-            //     this.scene.add(this.sky);
-            // });
-
             this.sky = new Sky();
             this.sun = new Vector3();
-            this.skyLight = new DirectionalLight(0xe8bdb0, 5);
-            this.sky.scale.setScalar(450000);
+            this.sky.scale.setScalar(1000);
             const uniforms = (this.sky.material as ShaderMaterial).uniforms;
             uniforms["turbidity"].value = 10;
             uniforms["rayleigh"].value = 1.443;
@@ -133,30 +135,32 @@ export class AirDefence {
             this.water = new Water(
                 new PlaneGeometry(10000, 10000),
                 {
-                    textureWidth: 512,
-                    textureHeight: 512,
-                    waterNormals: this.loader.load(RES_ROOT + 'waternormals.jpg', function (texture) {
+                    textureWidth: 1024,
+                    textureHeight: 1024,
+                    color: "#1ca3ec",
+                    flowDirection: new Vector2(1, 1),
+                    normalMap0: this.loader.load(RES_ROOT + 'Water_1_M_Normal.jpg', function (texture) {
                         texture.wrapS = texture.wrapT = RepeatWrapping;
                     }),
-                    sunDirection: new Vector3(),
-                    sunColor: 0xffffff,
-                    waterColor: 0x001e0f,
-                    distortionScale: 3.7,
-                    fog: this.scene.fog !== undefined
+                    normalMap1: this.loader.load(RES_ROOT + 'Water_2_M_Normal.jpg', function (texture) {
+                        texture.wrapS = texture.wrapT = RepeatWrapping;
+                    }),
+                    flowSpeed: 0.01,
                 }
             );
+            this.water.position.y = -30;
             this.water.rotation.x = -Math.PI / 2;
+            // this.lights.sky.castShadow = true;
             this.scene.add(this.sky);
-            this.scene.add(this.skyLight);
             this.scene.add(this.water);
-            this.scene.add(new HemisphereLight(0x0000ff, 0x00ff00, 0.6));
-            // this.sceneEnv.add(this.sky);
-            this.updateStage();
-            setInterval(this.updateStage.bind(this), 1000);
+            this.scene.add(this.lights.sky);
+            this.scene.add(this.lights.hemi);
+            this.scene.add(this.lights.amb);
+            // this.updateStage();
+            // setInterval(this.updateStage.bind(this), 1000);
 
-
-            const helper = new GridHelper(10000, 2, 0xffffff, 0xffffff);
-            this.scene.add(helper);
+            this.scene.add(new GridHelper(10000, 10, 0xffffff, 0xffffff));
+            this.scene.add(new AxesHelper(3));
         }
 
         {
@@ -191,33 +195,70 @@ export class AirDefence {
                 });
             });
         }
+        {
+            const geometry = new SphereGeometry(50, 32, 16);
+            const material = new MeshStandardMaterial({roughness: 0, metalness: 1});
+            const mesh = new Mesh(geometry, material);
+            // mesh.castShadow = true;
+            // mesh.receiveShadow = true;
+            mesh.position.y = 100;
+            this.scene.add(mesh);
+        }
+        {
+            this.gui = new GUI({autoPlace: false});
+            this.gui.domElement.id = "game-dat-gui";
+            const sky = this.gui.addFolder('Environment')
+            sky.add(this, 'time', -90, 90).name("Time").onChange(() => this.updateStage())
+            // sky.add(cube.rotation, 'y', 0, Math.PI * 2)
+            // sky.add(cube.rotation, 'z', 0, Math.PI * 2)
+            sky.open()
+            const game = this.gui.addFolder('Game')
+            game.add(this, "fireProjectile").name("Fire");
+            game.add(this, "useFPSCamera").name("FPS Camera");
+            game.open()
+        }
+        {
+            this.fpsCamera = new PerspectiveCamera(60, 1, 1, 10000);
+            this.scene.add(this.fpsCamera);
+            this.plane = new Airplane(this.fpsCamera);
+            this.scene.add(this.plane);
+            this.objects.push(this.plane);
+        }
         this.resize_observer = new ResizeObserver(this.on_resize.bind(this));
+        this.updateStage();
+        this.animation();
     }
 
     attach(parent?: HTMLElement) {
         if (this.parent) {
+            this.parent.removeChild(this.gui.domElement);
             this.parent.removeChild(this.stats.dom);
             this.parent.removeChild(this.renderer.domElement);
             this.resize_observer.unobserve(this.parent);
         }
         this.parent = parent;
         if (parent) {
+            parent.appendChild(this.gui.domElement);
             parent.appendChild(this.stats.dom);
             parent.appendChild(this.renderer.domElement);
             this.resize_observer.observe(parent);
             this.renderer.setPixelRatio(parent.ownerDocument.defaultView?.devicePixelRatio ?? 1);
-            parent.ownerDocument.defaultView?.requestAnimationFrame(() => this.animation(Date.now()));
         }
     }
 
-    animation(time: number) {
-        this.lastFrame ??= time;
-        this.animateStage((time - this.lastFrame) / 1000);
-        this.controls.update((time - this.lastFrame) / 1000);
-        this.renderer.render(this.scene, this.camera);
-        this.lastFrame = time;
+    animation() {
+        requestAnimationFrame(() => this.animation());
+        // this.animateStage((time - this.lastFrame) / 1000);
+        // this.controls.update()
+        const delta = this.clock.getDelta();
+        this.objects.forEach(o => o.update(delta));
+        this.objects.filter(o => !this.scene.children.includes(o)).forEach(o => {
+            const index = this.objects.indexOf(o);
+            const x = this.objects.splice(index, 1);
+        });
+        this.controls.update(delta);
+        this.renderer.render(this.scene, this.useFPSCamera ? this.fpsCamera : this.camera);
         this.stats.update();
-        this.parent?.ownerDocument.defaultView?.requestAnimationFrame(() => this.animation(Date.now()));
     }
 
     regenerate(blend: Material) {
@@ -235,7 +276,7 @@ export class AirDefence {
         if (!this.terrainScene) return;
         let geo = (this.terrainScene.children[0] as Mesh).geometry;
         let decoScene = ScatterMeshes(geo, {
-            scene: undefined,
+            scene: this.terrainScene,
             mesh: buildTree(),
             w: this.options.xSegments,
             h: this.options.ySegments,
@@ -253,9 +294,9 @@ export class AirDefence {
             maxSlope: 0.6283185307179586, // 36deg or 36 / 180 * Math.PI, about the angle of repose of earth
             maxTilt: 0.15707963267948966 //  9deg or  9 / 180 * Math.PI. Trees grow up regardless of slope but we can allow a small variation
         });
-        if (decoScene) {
-            this.terrainScene.add(decoScene);
-        }
+        // if (decoScene) {
+        //     this.terrainScene.add(decoScene);
+        // }
     }
 
     private on_resize() {
@@ -265,24 +306,52 @@ export class AirDefence {
             this.camera.updateProjectionMatrix();
             this.fpsCamera.aspect = this.parent.clientWidth / this.parent.clientHeight;
             this.fpsCamera.updateProjectionMatrix();
-            // this.controls.handleResize();
         }
     }
 
     private updateStage() {
-        const dayLength = 10 * 60 * 1000;
-        const phi = MathUtils.degToRad((Date.now() % dayLength) / dayLength * 180 - 90);
+        const dayLength = 20 * 1000;
+        const phi = MathUtils.degToRad(
+            // (Date.now() % dayLength) / dayLength * 180 - 90
+            // 85
+            90 - this.time
+        );
+        this.renderer.toneMappingExposure = 0.5 - Math.cos(phi) * 0.25;
         const theta = MathUtils.degToRad(180);
         this.sun.setFromSphericalCoords(1, phi, theta);
-        this.skyLight.position.copy(this.sun);
         this.sky.material.uniforms['sunPosition'].value.copy(this.sun);
-        this.water.material.uniforms['sunDirection'].value.copy(this.sun).normalize();
-        let renderTarget = this.pmremGenerator.fromScene(this.sceneEnv);
-        // this.scene.environment = renderTarget.texture;
+        calculateSunlight(this.sky.material, this.lights.sky);
+        this.lights.hemi.color.copy(this.lights.sky.color);
+        if (this._renderTarget !== undefined) this._renderTarget.dispose();
+
+        this.sceneEnv.add(this.sky);
+        this._renderTarget = this.pmremGenerator.fromScene(this.sceneEnv);
+        this.scene.add(this.sky);
+        this.scene.environment = this._renderTarget.texture;
     }
 
-    private animateStage(delta: number) {
-        this.water.material.uniforms['time'].value += 1.0 / 60.0;
+    fireProjectile() {
+        for (let i = 0; i < 1000; i++) {
+            const velocity = this.plane.position.clone().normalize().multiplyScalar(810);
+            const magnitude = velocity.length();
+            let pitch = Math.asin(velocity.y / magnitude), yaw = Math.atan2(-velocity.x, velocity.z),
+                deviation = Math.random() * 0.2, dev_direction = Math.random() * 2 * Math.PI;
+            pitch += Math.sin(dev_direction) * deviation;
+            yaw += Math.cos(dev_direction) * deviation;
+
+            const obj = new BallisticObject({
+                drag: false,
+                gravity: false,
+                startPos: new Vector3(0, 0, 0),
+                startVec: new Vector3(
+                    (magnitude * Math.sin(yaw) * Math.cos(pitch)),
+                    (magnitude * Math.sin(pitch)),
+                    (magnitude * Math.cos(yaw) * Math.cos(pitch))),
+            });
+            obj.et = -i * 0.05;
+            this.objects.push(obj);
+            this.scene.add(obj);
+        }
     }
 }
 
