@@ -1,9 +1,9 @@
 import {GLTFLoader} from "three/examples/jsm/loaders/GLTFLoader";
 import {RES_ROOT} from "./config";
-import {Group, Matrix4, Quaternion, Vector3} from "three";
+import {AxesHelper, Group, Matrix4, Quaternion, Vector3} from "three";
 import type {DynObject} from "./dyn_object";
 import type {Mesh} from "three/src/objects/Mesh";
-import {updatePlaneAxis} from "~/games/air-defence/controls";
+import {turbo, updatePlaneAxis} from "~/games/air-defence/controls";
 import type {PerspectiveCamera} from "three/src/cameras/PerspectiveCamera";
 
 const loader = new GLTFLoader();
@@ -22,8 +22,10 @@ export class Airplane extends Group implements DynObject {
         loader.load(RES_ROOT + 'airplane.glb', (gltf) => {
             [this.parts.supports, this.parts.chassis, this.parts.helix] = gltf.scene.children as Mesh[];
             gltf.scene.rotation.y = Math.PI;
+            this.parts.helix.geometry.center();
+            this.parts.helix.position.set(0, 0.655, 6.200);
             this.add(gltf.scene);
-            console.log(gltf);
+            gltf.scene.add(new AxesHelper())
         });
     }
 
@@ -74,6 +76,6 @@ export class Airplane extends Group implements DynObject {
         this.camera.matrix.copy(cameraMatrix);
         this.camera.matrixWorldNeedsUpdate = true;
 
-        if (this.parts.helix) this.parts.helix.rotation.z -= delta;
+        if (this.parts.helix) this.parts.helix.rotation.z -= delta * (10+turbo);
     }
 }

@@ -45,4 +45,9 @@ export class BallisticObject extends Mesh implements DynObject {
         // this.rotation.set(MathUtils.radToDeg(pitch), MathUtils.radToDeg(yaw), 0);
         if (this.position.y < 0) this.removeFromParent();
     }
+
+    trajectory(){
+        const dir = new Vector3(this.options.startVec.x,0,this.options.startVec.z).normalize();
+        const wave = this.options.startVec.clone().multiplyScalar(this.et);
+    }
 }

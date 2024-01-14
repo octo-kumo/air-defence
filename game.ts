@@ -111,6 +111,7 @@ export class AirDefence {
 
             this.camera = new PerspectiveCamera(60, 1, 1, 2000000);
             this.scene.add(this.camera);
+            // this.camera.position.z = -15
             this.camera.position.x = 449;
             this.camera.position.y = 311;
             this.camera.position.z = 376;
@@ -126,7 +127,7 @@ export class AirDefence {
         {
             this.sky = new Sky();
             this.sun = new Vector3();
-            this.sky.scale.setScalar(1000);
+            this.sky.scale.setScalar(100000);
             const uniforms = (this.sky.material as ShaderMaterial).uniforms;
             uniforms["turbidity"].value = 10;
             uniforms["rayleigh"].value = 1.443;
