@@ -1,1 +1,1 @@
-export const RES_ROOT = "/assets/airdefence/"
+export const RES_ROOT = "assets/airdefence/"
