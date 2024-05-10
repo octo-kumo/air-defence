@@ -14,12 +14,10 @@ import {
     Material,
     MathUtils,
     MeshLambertMaterial,
-    MeshStandardMaterial,
     Object3D,
     PlaneGeometry,
     PMREMGenerator,
     RepeatWrapping,
-    SphereGeometry,
     TextureLoader,
     Vector2,
     Vector3,
@@ -38,16 +36,16 @@ import Stats from 'three/examples/jsm/libs/stats.module';
 import {calculateSunlight} from "~/games/air-defence/environment";
 import {GUI} from 'dat.gui';
 import {MapControls} from "three/examples/jsm/controls/MapControls";
-import {BallisticObject} from "~/games/air-defence/ballistic_object";
 import {Airplane} from "~/games/air-defence/airplane";
 import type {DynObject} from "~/games/air-defence/dyn_object";
+import {Gun} from "~/games/air-defence/gun";
 
 export class AirDefence {
     private parent?: HTMLElement;
     private readonly loader: TextureLoader;
     private readonly stats: Stats;
     private readonly gui: GUI;
-    private readonly scene: Scene;
+    readonly scene: Scene;
     private readonly sceneEnv: Scene;
     private readonly renderer: WebGLRenderer;
     private readonly pmremGenerator: PMREMGenerator;
@@ -65,28 +63,29 @@ export class AirDefence {
     private _renderTarget?: WebGLRenderTarget;
 
     /** DAT GUI **/
-    time: number = 0;
-    useFPSCamera = false;
+    time: number = 45;
+    useCamera: "world" | "gun" | "plane" = "world";
 
-    private objects: DynObject[] = [];
+    objects: DynObject[] = [];
     private lights = {
         sky: new DirectionalLight(0xe8bdb0, 0.2),
         hemi: new HemisphereLight(0xffffff, 0x8c3b0c, 0.2),
         amb: new AmbientLight(0xff0000, 0.1)
     }
-    private plane: Airplane;
+    readonly plane: Airplane;
+    private gun: Gun;
 
 
     constructor() {
-        const segments = 63, size = 1024;
+        const segments = 63, size = 2048;
         this.loader = new TextureLoader();
         this.options = {
-            frequency: 0, optimization: 0,
+            frequency: 10, optimization: 0,
             easing: Linear,
             heightmap: DiamondSquare,
             maxHeight: 100,
             minHeight: -100,
-            steps: 1,
+            steps: 0,
             stretch: true,
             turbulent: false,
             xSize: size,
@@ -112,12 +111,7 @@ export class AirDefence {
             this.camera = new PerspectiveCamera(60, 1, 1, 2000000);
             this.scene.add(this.camera);
             // this.camera.position.z = -15
-            this.camera.position.x = 449;
-            this.camera.position.y = 311;
-            this.camera.position.z = 376;
-            this.camera.rotation.x = -52 * Math.PI / 180;
-            this.camera.rotation.y = 35 * Math.PI / 180;
-            this.camera.rotation.z = 37 * Math.PI / 180;
+            this.resetCamera();
 
             this.clock = new Clock(true);
         }
@@ -196,15 +190,15 @@ export class AirDefence {
                 });
             });
         }
-        {
-            const geometry = new SphereGeometry(50, 32, 16);
-            const material = new MeshStandardMaterial({roughness: 0, metalness: 1});
-            const mesh = new Mesh(geometry, material);
-            // mesh.castShadow = true;
-            // mesh.receiveShadow = true;
-            mesh.position.y = 100;
-            this.scene.add(mesh);
-        }
+        // {
+        //     const geometry = new SphereGeometry(50, 32, 16);
+        //     const material = new MeshStandardMaterial({roughness: 0, metalness: 1});
+        //     const mesh = new Mesh(geometry, material);
+        //     // mesh.castShadow = true;
+        //     // mesh.receiveShadow = true;
+        //     mesh.position.y = 100;
+        //     this.scene.add(mesh);
+        // }
         {
             this.gui = new GUI({autoPlace: false});
             this.gui.domElement.id = "game-dat-gui";
@@ -215,19 +209,30 @@ export class AirDefence {
             sky.open()
             const game = this.gui.addFolder('Game')
             game.add(this, "fireProjectile").name("Fire");
-            game.add(this, "useFPSCamera").name("FPS Camera");
+            game.add(this, "useCamera", ["world", "plane", "gun"]).name("Camera");
             game.open()
         }
         {
             this.fpsCamera = new PerspectiveCamera(60, 1, 1, 10000);
             this.scene.add(this.fpsCamera);
             this.plane = new Airplane(this.fpsCamera);
+            this.plane.position.set(100, 100, -100)
             this.scene.add(this.plane);
             this.objects.push(this.plane);
+        }
+        {
+            this.gun = new Gun(this);
+            this.scene.add(this.gun);
+
+            this.gun.position.set(0, 100, 0)
         }
         this.resize_observer = new ResizeObserver(this.on_resize.bind(this));
         this.updateStage();
         this.animation();
+    }
+
+    fireProjectile() {
+        this.gun.fireProjectile()
     }
 
     attach(parent?: HTMLElement) {
@@ -258,7 +263,8 @@ export class AirDefence {
             const x = this.objects.splice(index, 1);
         });
         this.controls.update(delta);
-        this.renderer.render(this.scene, this.useFPSCamera ? this.fpsCamera : this.camera);
+        this.renderer.render(this.scene, this.useCamera === "plane" ? this.fpsCamera :
+            this.useCamera === "world" ? this.camera : this.gun.camera!);
         this.stats.update();
     }
 
@@ -268,6 +274,7 @@ export class AirDefence {
         this.terrainScene = Terrain(this.options);
         this.scene.add(this.terrainScene);
         this.scatterMeshes();
+        this.placeGun();
     }
 
     scatterMeshes() {
@@ -277,10 +284,10 @@ export class AirDefence {
         if (!this.terrainScene) return;
         let geo = (this.terrainScene.children[0] as Mesh).geometry;
         let decoScene = ScatterMeshes(geo, {
-            scene: this.terrainScene,
+            // scene: this.terrainScene,
             mesh: buildTree(),
-            w: this.options.xSegments,
-            h: this.options.ySegments,
+            w: this.options.xSize,
+            h: this.options.ySize,
             spread: function (v, k) {
                 let rv = h[k],
                     place = false;
@@ -293,11 +300,11 @@ export class AirDefence {
             },
             smoothSpread: 0.2,
             maxSlope: 0.6283185307179586, // 36deg or 36 / 180 * Math.PI, about the angle of repose of earth
-            maxTilt: 0.15707963267948966 //  9deg or  9 / 180 * Math.PI. Trees grow up regardless of slope but we can allow a small variation
+            maxTilt: 9 //  9deg or  9 / 180 * Math.PI. Trees grow up regardless of slope but we can allow a small variation
         });
-        // if (decoScene) {
-        //     this.terrainScene.add(decoScene);
-        // }
+        if (decoScene) {
+            this.terrainScene.add(decoScene);
+        }
     }
 
     private on_resize() {
@@ -331,28 +338,19 @@ export class AirDefence {
         this.scene.environment = this._renderTarget.texture;
     }
 
-    fireProjectile() {
-        for (let i = 0; i < 1000; i++) {
-            const velocity = this.plane.position.clone().normalize().multiplyScalar(810);
-            const magnitude = velocity.length();
-            let pitch = Math.asin(velocity.y / magnitude), yaw = Math.atan2(-velocity.x, velocity.z),
-                deviation = Math.random() * 0.2, dev_direction = Math.random() * 2 * Math.PI;
-            pitch += Math.sin(dev_direction) * deviation;
-            yaw += Math.cos(dev_direction) * deviation;
 
-            const obj = new BallisticObject({
-                drag: false,
-                gravity: false,
-                startPos: new Vector3(0, 0, 0),
-                startVec: new Vector3(
-                    (magnitude * Math.sin(yaw) * Math.cos(pitch)),
-                    (magnitude * Math.sin(pitch)),
-                    (magnitude * Math.cos(yaw) * Math.cos(pitch))),
-            });
-            obj.et = -i * 0.05;
-            this.objects.push(obj);
-            this.scene.add(obj);
-        }
+    private resetCamera() {
+        this.camera.position.x = 449;
+        this.camera.position.y = 311;
+        this.camera.position.z = 376;
+        this.camera.rotation.x = -52 * Math.PI / 180;
+        this.camera.rotation.y = 35 * Math.PI / 180;
+        this.camera.rotation.z = 37 * Math.PI / 180;
+    }
+
+    private placeGun() {
+        let geo = (this.terrainScene!.children[0] as Mesh).geometry;
+
     }
 }
 

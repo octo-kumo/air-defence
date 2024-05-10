@@ -6,7 +6,7 @@ export interface ScatterOptions {
     spread: number | ((vertex: Vector3, key: number) => boolean);
     smoothSpread: number;
     scene: Object3D;
-    sizeVariance?: number;
+    sizeVariance: number;
     randomness: (faceIndex?: number, faceCount?: number) => number[] | number;
     maxSlope: number;
     maxTilt: number;
@@ -81,59 +81,77 @@ export function ScatterMeshes(geometry: BufferGeometry, opts: Partial<ScatterOpt
         maxSlope: 0.6283185307179586, // 36deg or 36 / 180 * Math.PI, about the angle of repose of earth
         maxTilt: Infinity,
         w: 0,
-        h: 0
+        h: 0,
+        ...opts
     };
-    options = Object.assign(options, opts);
 
+    const spreadIsNumber = typeof options.spread === 'number';
     let randomHeightmap: number[] | number;
-    randomHeightmap = options.randomness();
-    // @ts-ignore
-    let randomness: Function = typeof randomHeightmap === 'number' ? Math.random : (k: number) => randomHeightmap[k];
+    let randomness: (k: number) => number;
+    const spreadRange = 1 / options.smoothSpread;
+    const doubleSizeVariance = options.sizeVariance * 2;
+    const vertex1 = new Vector3();
+    const vertex2 = new Vector3();
+    const vertex3 = new Vector3();
+    const faceNormal = new Vector3();
+    const up = options.mesh.up.clone().applyAxisAngle(new Vector3(1, 0, 0), 0.5 * Math.PI);
+
+    if (spreadIsNumber) {
+        randomHeightmap = options.randomness();
+        randomness = typeof randomHeightmap === 'number' ? Math.random : (k) => (randomHeightmap as number[])[k];
+    }
+
     geometry = geometry.toNonIndexed();
-    let gArray = geometry.attributes.position.array;
-    for (let i = 0; i < geometry.attributes.position.array.length; i += 9) {
-        new Vector3().set(gArray[i], gArray[i + 1], gArray[i + 2]);
-        new Vector3().set(gArray[i + 3], gArray[i + 4], gArray[i + 5]);
-        new Vector3().set(gArray[i + 6], gArray[i + 7], gArray[i + 8]);
-        Triangle.getNormal(new Vector3(), new Vector3(), new Vector3(), new Vector3());
+    const gArray = geometry.attributes.position.array;
+
+    for (let i = 0; i < gArray.length; i += 9) {
+        vertex1.set(gArray[i], gArray[i + 1], gArray[i + 2]);
+        vertex2.set(gArray[i + 3], gArray[i + 4], gArray[i + 5]);
+        vertex3.set(gArray[i + 6], gArray[i + 7], gArray[i + 8]);
+        Triangle.getNormal(vertex1, vertex2, vertex3, faceNormal);
 
         let place = false;
-        if (typeof options.spread === 'number') {
-            let rv = randomness(i / 9);
-            if (rv < options.spread) {
+
+        if (spreadIsNumber) {
+            const rv = randomness!(i / 9);
+            if (rv < (options.spread as number)) {
                 place = true;
-            } else if (rv < options.spread + options.smoothSpread) {
+            } else if (rv < (options.spread as number) + options.smoothSpread) {
                 // Interpolate rv between spread and spread + smoothSpread,
                 // then multiply that "easing" value by the probability
                 // that a mesh would get placed on a given face.
-                place = EaseInOut((rv - options.spread) / options.smoothSpread) * options.spread > Math.random();
+                place = EaseInOut((rv - (options.spread as number)) * spreadRange) * (options.spread as number) > Math.random();
             }
         } else {
-            //@ts-ignore
-            place = options.spread(new Vector3(), i / 9, new Vector3(), i);
+            place = (options.spread as ((...args: any[]) => boolean))(vertex1, i / 9, faceNormal, i);
         }
+
         if (place) {
             // Don't place a mesh if the angle is too steep.
-            if (new Vector3().angleTo(options.mesh.up.clone().applyAxisAngle(new Vector3(1, 0, 0), 0.5 * Math.PI)) > options.maxSlope) {
+            if (faceNormal.angleTo(up) > options.maxSlope) {
                 continue;
             }
-            let mesh = options.mesh.clone();
-            mesh.position.addVectors(new Vector3(), new Vector3()).add(new Vector3()).divideScalar(3);
+
+            const mesh = options.mesh.clone();
+            mesh.position.addVectors(vertex1, vertex2).add(vertex3).divideScalar(3);
+
             if (options.maxTilt > 0) {
-                let normal = mesh.position.clone().add(new Vector3());
+                const normal = mesh.position.clone().add(faceNormal);
                 mesh.lookAt(normal);
-                let tiltAngle = new Vector3().angleTo(options.mesh.up.clone().applyAxisAngle(new Vector3(1, 0, 0), 0.5 * Math.PI));
+                const tiltAngle = faceNormal.angleTo(up);
                 if (tiltAngle > options.maxTilt) {
-                    let ratio = options.maxTilt / tiltAngle;
+                    const ratio = options.maxTilt / tiltAngle;
                     mesh.rotation.x *= ratio;
                     mesh.rotation.y *= ratio;
                     mesh.rotation.z *= ratio;
                 }
             }
+
             mesh.rotation.x += 90 / 180 * Math.PI;
             mesh.rotateY(Math.random() * 2 * Math.PI);
+
             if (options.sizeVariance) {
-                let variance = Math.random() * options.sizeVariance * 2 - options.sizeVariance;
+                const variance = Math.random() * doubleSizeVariance - options.sizeVariance;
                 mesh.scale.x = mesh.scale.z = 1 + variance;
                 mesh.scale.y += variance;
             }
@@ -174,7 +192,7 @@ export function ScatterMeshes(geometry: BufferGeometry, opts: Partial<ScatterOpt
  *   `options.randomness` parameter to the {@link ScatterMeshes}
  *   function.
  */
-export function ScatterHelper(method: Function, options: TerrainOptions, skip: number, threshold: number) {
+export function ScatterHelper(method: Function, options: TerrainOptions, skip: number, threshold: number): () => Float32Array {
     skip = skip || 1;
     threshold = threshold || 0.25;
     options.frequency = options.frequency || 2.5;
@@ -192,7 +210,5 @@ export function ScatterHelper(method: Function, options: TerrainOptions, skip: n
             heightmap[i] = 1; // 0 = place, 1 = don't place
         }
     }
-    return function () {
-        return heightmap;
-    };
+    return () => heightmap;
 }
