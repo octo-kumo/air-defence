@@ -1,12 +1,12 @@
 import { Group, Object3D, Vector3 } from "three";
-import type { DynObject } from "~/games/air-defence/dyn_object";
+import { makeLabel, type DynObject } from "~/games/air-defence/dyn_object";
 import type { AirDefence } from "~/games/air-defence/game";
 import { BallisticObject } from "~/games/air-defence/ballistic_object";
 import type { PerspectiveCamera } from "three/src/cameras/PerspectiveCamera";
 import { loadAsset } from "../base/assets";
 
 
-export class Gun extends Group implements DynObject {
+export class Turret extends Group implements DynObject {
     private _game: AirDefence;
     camera?: PerspectiveCamera;
     top?: Group;
@@ -17,11 +17,13 @@ export class Gun extends Group implements DynObject {
     isFiring: boolean = false;
     fireCooldown: number = 0;
     firePeriod: number = 0.01;
+    hittable = true;
 
     constructor(game: AirDefence) {
         super();
+        this.name = 'Turret';
         this._game = game;//new Mesh(new SphereGeometry(0.001), new MeshBasicMaterial({ color: 0xff0000 }));
-        loadAsset('airdefence/turret.glb').then((gltf) => {
+        loadAsset('airdefence/turret.glb', true, true).then((gltf) => {
             const [base, top] = gltf.scene.clone().children[0].children;
             this.add(base);
 
@@ -34,6 +36,7 @@ export class Gun extends Group implements DynObject {
             this.add(this.base);
             this.rotate(0, 0);
         });
+        makeLabel(this, 0.5);
     }
 
 
@@ -63,7 +66,7 @@ export class Gun extends Group implements DynObject {
         obj.et = -this.fireCooldown - 0.05;
         obj.update(0.05);
         this.fireCooldown += this.firePeriod;
-        this._game.objects.add(obj);
+        this._game.addObject(obj);
         this._game.scene.add(obj);
     }
 

@@ -1,8 +1,21 @@
 import type { DynObject } from "./dyn_object";
-import { CylinderGeometry, Euler, Matrix3, MeshPhongMaterial, MeshStandardMaterial, Raycaster, Vector3, type Intersection } from "three";
+import { BatchedMesh, Box3, BufferGeometry, CylinderGeometry, Euler, Matrix3, MeshStandardMaterial, Object3D, Raycaster, Vector3, type Intersection } from "three";
 import { Mesh } from "three/src/objects/Mesh";
 import type { AirDefence } from "./game";
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+
+import {
+    computeBoundsTree, disposeBoundsTree,
+    computeBatchedBoundsTree, disposeBatchedBoundsTree, acceleratedRaycast,
+} from 'three-mesh-bvh';
+
+BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+Mesh.prototype.raycast = acceleratedRaycast;
+
+BatchedMesh.prototype.computeBoundsTree = computeBatchedBoundsTree;
+BatchedMesh.prototype.disposeBoundsTree = disposeBatchedBoundsTree;
+BatchedMesh.prototype.raycast = acceleratedRaycast;
 
 export interface BallisticOptions {
     startPos: Vector3;
@@ -12,7 +25,7 @@ export interface BallisticOptions {
 }
 
 const gravity = new Vector3(0, -9.81, 0);
-const geo = new CylinderGeometry(0.02, 0.02, 0.3, 4);
+const geo = new CylinderGeometry(0.02, 0.02, 1, 4);
 geo.rotateX(Math.PI / 2);
 const mat = new MeshStandardMaterial({
     color: "#000000",
@@ -20,11 +33,9 @@ const mat = new MeshStandardMaterial({
     emissiveIntensity: 1,
 });
 const raycaster = new Raycaster();
-
-const decalMaterial = new MeshPhongMaterial({
-    specular: 0x444444,
-    shininess: 30,
-    transparent: true,
+raycaster.firstHitOnly = true;
+const decalMaterial = new MeshStandardMaterial({
+    color: "#000000",
     depthTest: true,
     depthWrite: false,
     polygonOffset: true,
@@ -32,42 +43,50 @@ const decalMaterial = new MeshPhongMaterial({
     wireframe: false
 });
 export class BallisticObject extends Mesh implements DynObject {
+    hittable = false;
     options: BallisticOptions;
+    v = new Vector3();
     et = 0;
     game: AirDefence;
     intersects: Array<Intersection<Mesh>> = [];
+    mass = 0.1;
 
     constructor(props: BallisticOptions, game: AirDefence) {
         super();
         this.game = game;
         this.options = props;
+        this.v.copy(props.startVec);
+        this.position.copy(props.startPos);
         this.geometry = geo.clone();
         this.material = mat.clone();
-        // this.add(new Mesh(geo, mat));
     }
 
-    update(delta: number): void {
+    update(delta: number, box?: Box3): void {
         this.et += delta;
-        const newPos = this.options.startPos.clone()
-            .add(this.options.startVec.clone().multiplyScalar(this.et))
-            .add(gravity.clone().multiplyScalar(0.5 * this.et * this.et * 9.81));
-        const diff = newPos.clone().sub(this.position);
-        raycaster.far = diff.length();
-        raycaster.set(this.position, diff.normalize());
-        if (this.checkIntersection()) return;
-        this.lookAt(newPos);
-        this.position.copy(newPos);
         this.visible = this.et >= 0;
+        if (this.et < 0) return;
+        if (this.et < delta) delta -= this.et;
+        const vel = this.v.length();
+        if (box?.containsPoint(this.position)) {
+            raycaster.far = vel * delta;
+            raycaster.set(this.position, this.v);
+            if (this.checkIntersection()) return;
+        }
+
+        this.v.addScaledVector(gravity, delta);
+        const dragForce = 0.5 * 1.225 * 0.01 * drag_cd(vel / 343) * vel * vel / this.mass;
+
+        const accel = this.v.clone().normalize().multiplyScalar(-dragForce).add(gravity);
+        this.v.addScaledVector(accel, delta);
+
+        const newp = this.position.clone().addScaledVector(this.v, delta);
+        this.lookAt(newp);
+        this.position.copy(newp);
+
         if (!this.visible) return;
         if (this.position.y < 0) {
-            this.removeFromParent();
-            this.game.objects.delete(this);
+            this.game.removeObject(this);
         }
-    }
-
-    trajectory() {
-        const dir = new Vector3(this.options.startVec.x, 0, this.options.startVec.z).normalize();
-        const wave = this.options.startVec.clone().multiplyScalar(this.et);
     }
 
     checkIntersection() {
@@ -79,22 +98,45 @@ export class BallisticObject extends Mesh implements DynObject {
             const normalMatrix = new Matrix3().getNormalMatrix(mesh.matrixWorld);
 
             const n = this.intersects[0].face?.normal.clone() || new Vector3();
-            n.applyNormalMatrix(normalMatrix);
-            n.multiplyScalar(10);
-            n.add(this.intersects[0].point);
+            const hitAngle = n.angleTo(this.v);
 
-            const material = decalMaterial.clone();
-            material.color.setHex(Math.random() * 0xffffff);
+            let _host: Object3D = mesh;
+            while (_host.parent && !(_host as DynObject).hittable) _host = _host.parent;
+            const host = _host as DynObject;
+            const deflectChance = Math.pow(Math.sin(hitAngle), 4);
+            if (Math.random() < deflectChance - 0.3) {
+                this.v.reflect(n);
+                this.v.multiplyScalar(0.2);
+                this.position.copy(p.addScaledVector(this.v, 0.01));
+            } else {
+                if (host.hittable) host.hit?.(this);
+                n.applyNormalMatrix(normalMatrix);
+                n.multiplyScalar(10);
+                n.add(this.intersects[0].point);
 
-            const m = new Mesh(new DecalGeometry(mesh, p.clone(), new Euler().setFromVector3(n), new Vector3(0.1, 0.1, 0.1)), decalMaterial);
-            mesh.attach(m);
+                const material = decalMaterial.clone();
+                material.color.setHex(Math.random() * 0xffffff);
 
-            this.game.addDecal(m);
-
-            this.removeFromParent();
-            this.game.objects.delete(this);
-            return true;
+                const m = new Mesh(new DecalGeometry(mesh, p.clone(), new Euler().setFromVector3(n), new Vector3(0.1, 0.1, 0.1)), material);
+                mesh.attach(m);
+                this.game.addDecal(m);
+                this.game.removeObject(this);
+                return true;
+            }
         }
-
+        return false;
     }
+}
+
+function drag_cd(M: number): number {
+    const M_p = 1.3;
+    const a = 0.1;
+    const b = 3.9;
+    const c = 0.217;
+    const d = 10;
+    const e = 2.5;
+    const f = -10;
+    const g = 5.6;
+
+    return a * Math.exp(-b * M) + (c / (1 + d * Math.pow(M - M_p, 2))) + (e / (Math.pow(M, f) + g));
 }
