@@ -1,15 +1,15 @@
 import { Box3, Object3D } from "three";
-import { CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+import { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import type { BallisticObject } from "./ballistic_object";
 
-export interface DynObject extends Object3D<any> {
+export interface IDynObject {
     hittable: boolean;
     update(delta: number, box?: Box3): void;
     hit?(proj: BallisticObject): void;
 }
+export type DynObject = IDynObject & Object3D;
 
-
-export function makeLabel(obj: DynObject, offset: number = 0) {
+export function makeLabel(obj: DynObject & Object3D, offset: number = 0) {
     const label = document.createElement('div');
     label.className = 'label';
     label.textContent = obj.name;

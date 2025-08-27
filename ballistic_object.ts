@@ -1,6 +1,6 @@
 import type { DynObject } from "./dyn_object";
 import { BatchedMesh, Box3, BufferGeometry, CylinderGeometry, Euler, Matrix3, MeshStandardMaterial, Object3D, Raycaster, Vector3, type Intersection } from "three";
-import { Mesh } from "three/src/objects/Mesh";
+import { Mesh } from "three";
 import type { AirDefence } from "./game";
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 
@@ -90,7 +90,7 @@ export class BallisticObject extends Mesh implements DynObject {
     }
 
     checkIntersection() {
-        raycaster.intersectObjects(this.game.hittables, true, this.intersects);
+        raycaster.intersectObjects(this.game.hittables as any, true, this.intersects);
 
         if (this.intersects.length > 0) {
             const p = this.intersects[0].point;
@@ -100,8 +100,8 @@ export class BallisticObject extends Mesh implements DynObject {
             const n = this.intersects[0].face?.normal.clone() || new Vector3();
             const hitAngle = n.angleTo(this.v);
 
-            let _host: Object3D = mesh;
-            while (_host.parent && !(_host as DynObject).hittable) _host = _host.parent;
+            let _host: Object3D & DynObject = mesh as any;
+            while (_host.parent && !(_host as DynObject).hittable) _host = _host.parent as any;
             const host = _host as DynObject;
             const deflectChance = Math.pow(Math.sin(hitAngle), 4);
             if (Math.random() < deflectChance - 0.3) {

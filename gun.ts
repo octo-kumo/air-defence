@@ -1,8 +1,7 @@
-import { Group, Object3D, Vector3 } from "three";
+import { Group, Object3D, PerspectiveCamera, Vector3 } from "three";
 import { makeLabel, type DynObject } from "~/games/air-defence/dyn_object";
 import type { AirDefence } from "~/games/air-defence/game";
 import { BallisticObject } from "~/games/air-defence/ballistic_object";
-import type { PerspectiveCamera } from "three/src/cameras/PerspectiveCamera";
 import { loadAsset } from "../base/assets";
 
 
